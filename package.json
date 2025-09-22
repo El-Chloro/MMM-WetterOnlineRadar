@@ -1,16 +1,9 @@
 {
   "name": "MMM-WetterOnlineRadar",
   "version": "1.1.0",
-  "description": "MagicMirror² module showing WetterOnline radar only view with aggressive UI stripping and auto-reload.",
+  "description": "MagicMirror² module that shows ONLY the WetterOnline radar frame (wo-cloud) in a clean loop with auto-reload.",
   "main": "MMM-WetterOnlineRadar.js",
-  "keywords": [
-    "magicmirror",
-    "wetteronline",
-    "radar",
-    "regenradar",
-    "iframe",
-    "webview"
-  ],
+  "keywords": ["magicmirror","wetteronline","wo-cloud","radar","regenradar","webview"],
   "author": "El-Chloro",
   "license": "MIT"
 }
