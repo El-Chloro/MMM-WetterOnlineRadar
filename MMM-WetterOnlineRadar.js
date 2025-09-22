@@ -1,39 +1,45 @@
 /* MagicMirror² Module: MMM-WetterOnlineRadar
- * v1.6.1 — startet die WO-Radar-Animation robust (Klick, Key, Play-Zone-Fallback)
+ * v1.7.0 — Start erst nach 10s, zuverlässiger Play-Klick weit rechts,
+ * kein Dauergeklicke, Reload alle 5 Min (konfigurierbar).
  * License: MIT
  */
 Module.register("MMM-WetterOnlineRadar", {
   defaults: {
     // Standardort (Berlin) – wird von coords überschrieben:
     coords: { lat: 52.5200, lon: 13.4050 },
-    zoomLevel: 8,                 // wo-cloud: 6..12 üblich
+    zoomLevel: 8,                     // wo-cloud: 6..12 üblich
     // Optional: feste URL (überschreibt coords/zoomLevel komplett):
     url: null,
 
-    reloadInterval: 15 * 60 * 1000,
+    // Lade-/Darstellungs-Optionen
+    reloadInterval: 5 * 60 * 1000,    // <- NUR alle 5 Minuten neu laden
     width: "560px",
     height: "360px",
-    zoomCss: 1.0,                 // CSS-Scale (Feincropping)
-    useWebview: true,             // MUSS true sein für trusted input events
+    zoomCss: 1.0,                     // CSS-Scale (Feincropping)
+    useWebview: true,                 // MUSS true sein für trusted input events
     blockPointer: true,
     autoPlay: true,
 
+    // Klick-Tuning (Play-Zone-Fallback)
+    playZoneXFactor: 0.86,            // weiter rechts (0.86 ~ rechts unten)
+    playZoneBottomOffset: 26,         // Y = Höhe - Offset
+
+    // User-Agent für robustes Laden im Electron
     userAgent:
       "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
 
-    // Wie oft wir die „läuft schon?“-Prüfung + ggf. Start anstoßen:
-    keepAliveMs: 25000,
+    // keine Keep-Alive-Kicks mehr
+    keepAliveMs: 0,
 
-    // Wieviele Startversuche in den ersten Sekunden (je 1 Sek.)?
-    earlyTries: 20
+    // Verzögerung bis zum ersten Startversuch NACH dem Laden (ms)
+    firstStartDelay: 10000
   },
 
   start() {
     this._reloadTimer = null;
-    this._keepAliveTimer = null;
     this._webview = null;
-    this._earlyTryCount = 0;
-    this._earlyTimer = null;
+    this._iframe  = null;
+    this._firstStartTimer = null;
   },
 
   getStyles() { return [this.file("styles.css")]; },
@@ -56,11 +62,13 @@ Module.register("MMM-WetterOnlineRadar", {
       wv.setAttribute("allowpopups", "false");
 
       // Darstellung
-      wv.style.width = "100%";
-      wv.style.height = "100%";
-      wv.style.border = "0";
-      wv.style.transform = `scale(${this.config.zoomCss})`;
-      wv.style.transformOrigin = "0 0";
+      Object.assign(wv.style, {
+        width: "100%",
+        height: "100%",
+        border: "0",
+        transform: `scale(${this.config.zoomCss})`,
+        transformOrigin: "0 0"
+      });
       if (this.config.blockPointer) wv.style.pointerEvents = "none";
 
       // UA-Override
@@ -68,7 +76,7 @@ Module.register("MMM-WetterOnlineRadar", {
         try { wv.setUserAgentOverride(this.config.userAgent); } catch (e) {}
       }
 
-      // —— Trusted Input vom Host in den Webview ——
+      // trusted Input in den Webview
       const sendMouseClick = (x, y, clickCount = 1) => {
         try {
           wv.focus();
@@ -86,53 +94,48 @@ Module.register("MMM-WetterOnlineRadar", {
         } catch (e) {}
       };
 
-      // gezielter Start, wenn der Preload den Button gefunden hat
+      // Preload meldet Koordinaten des echten Play-Buttons, wenn wir ihn anfordern
       wv.addEventListener("ipc-message", (ev) => {
         if (ev.channel === "mm-wro-autoplay-target" && this.config.autoPlay) {
           const { x, y } = ev.args[0] || {};
           if (typeof x === "number" && typeof y === "number") {
             this._checkAndStart(() => {
-              // Fokus neutral setzen (Center-Klick), dann gezielt Play klicken
+              // 1) neutraler Fokus-Klick in die Kartenmitte
               this._focusCenter(sendMouseClick);
-              setTimeout(() => sendMouseClick(x, y, 1), 120);
-              setTimeout(() => sendKeyTap(" "), 260);   // falls Click „verschluckt“ wird
+              // 2) gezielter Klick auf Play
+              setTimeout(() => sendMouseClick(x, y, 1), 140);
             });
           }
         }
       });
 
-      const kickDetection = () => {
-        try { wv.executeJavaScript("window.__mmWROKick && window.__mmWROKick()"); } catch (e) {}
-        // zusätzlich Host-seitige Prüfung & Startsequenz
-        this._checkAndStart(() => this._forceStartSequence(sendMouseClick, sendKeyTap));
+      const scheduleFirstStart = () => {
+        if (this._firstStartTimer) clearTimeout(this._firstStartTimer);
+        this._firstStartTimer = setTimeout(() => {
+          // Prüfen & starten – EINMALIG nach 10s
+          this._checkAndStart(async () => {
+            // 1) erst den Preload bitten, die Koordinaten zu schicken
+            try {
+              await wv.executeJavaScript("window.__mmWROEmitPlayTarget && window.__mmWROEmitPlayTarget()");
+            } catch(_) {}
+
+            // 2) kleine Gnadenfrist, dann prüfen und ggf. Fallback-Klick/Key
+            setTimeout(() => {
+              this._checkAndStart(() => this._forceStartFallback(sendMouseClick, sendKeyTap));
+            }, 500);
+          });
+        }, Math.max(0, this.config.firstStartDelay|0));
       };
 
-      wv.addEventListener("dom-ready", kickDetection);
       wv.addEventListener("did-finish-load", () => {
+        // Scrollbars weg
         try {
           wv.executeJavaScript(`(function(){var s=document.createElement('style');s.textContent='*::-webkit-scrollbar{width:0;height:0}';document.documentElement.appendChild(s);}())`);
         } catch(e){}
-        kickDetection();
-        // frühe, wiederholte Versuche (1x pro Sekunde)
-        if (this._earlyTimer) clearInterval(this._earlyTimer);
-        this._earlyTryCount = 0;
-        this._earlyTimer = setInterval(() => {
-          this._earlyTryCount++;
-          this._checkAndStart(() => this._forceStartSequence(sendMouseClick, sendKeyTap));
-          if (this._earlyTryCount >= (this.config.earlyTries|0 || 20)) {
-            clearInterval(this._earlyTimer);
-            this._earlyTimer = null;
-          }
-        }, 1000);
+        scheduleFirstStart();
       });
-      wv.addEventListener("did-navigate-in-page", kickDetection);
-      wv.addEventListener("page-title-updated",   kickDetection);
 
-      // Keep-Alive
-      if (!this._keepAliveTimer && this.config.keepAliveMs > 0) {
-        this._keepAliveTimer = setInterval(kickDetection, this.config.keepAliveMs);
-      }
-
+      // Keine dauerhaften Keep-Alive-Kicks mehr.
       root.appendChild(wv);
       this._webview = wv;
     } else {
@@ -143,11 +146,13 @@ Module.register("MMM-WetterOnlineRadar", {
       iframe.loading = "eager";
       iframe.referrerPolicy = "no-referrer";
       iframe.sandbox = "allow-scripts allow-forms allow-same-origin";
-      iframe.style.width = "100%";
-      iframe.style.height = "100%";
-      iframe.style.border = "0";
-      iframe.style.transform = `scale(${this.config.zoomCss})`;
-      iframe.style.transformOrigin = "0 0";
+      Object.assign(iframe.style, {
+        width: "100%",
+        height: "100%",
+        border: "0",
+        transform: `scale(${this.config.zoomCss})`,
+        transformOrigin: "0 0"
+      });
       if (this.config.blockPointer) iframe.style.pointerEvents = "none";
       root.appendChild(iframe);
       this._iframe = iframe;
@@ -157,7 +162,7 @@ Module.register("MMM-WetterOnlineRadar", {
     return root;
   },
 
-  // —— Hilfsroutinen: „läuft schon?“ prüfen & falls nötig starten ——
+  // —— Prüfen „läuft schon?“ & ggf. starten ——
   _checkAndStart(doStart) {
     if (!this._webview || !this.config.autoPlay) return;
     try {
@@ -165,43 +170,44 @@ Module.register("MMM-WetterOnlineRadar", {
         "(window.__mmWROIsPlaying && window.__mmWROIsPlaying())"
       ).then((isPlaying) => {
         if (!isPlaying) doStart && doStart();
-      }).catch(()=>{ doStart && doStart(); });
+      }).catch(() => { doStart && doStart(); });
     } catch (_) { doStart && doStart(); }
   },
 
   _focusCenter(sendMouseClick) {
-    // neutraler Klick mitten in die Karte, gibt Fokus ohne Tabs/Buttons zu treffen
     try {
       this._webview.executeJavaScript("({w:window.innerWidth,h:window.innerHeight})")
         .then(dim => {
           if (!dim) return;
           const cx = Math.floor(dim.w * 0.5);
           const cy = Math.floor(dim.h * 0.5);
-          sendMouseClick(cx, cy, 1);
+          sendMouseClick(cx, cy, 1); // Fokus ohne Tabs/Buttons zu treffen
         }).catch(()=>{});
     } catch(_) {}
   },
 
-  _forceStartSequence(sendMouseClick, sendKeyTap) {
+  _forceStartFallback(sendMouseClick, sendKeyTap) {
     // 1) Fokus in die Karte
     this._focusCenter(sendMouseClick);
 
-    // 2) Key-Fallback
-    setTimeout(() => sendKeyTap(" "), 120);
-    setTimeout(() => sendKeyTap("Enter"), 240);
-
-    // 3) Klick in die „Play-Zone“ rechts unten (sicher weg von den Tabs)
+    // 2) Klick in die „Play-Zone“ deutlich rechts unten (nicht auf Tabs!)
     setTimeout(() => {
       try {
+        const xf = Math.min(0.98, Math.max(0.60, Number(this.config.playZoneXFactor) || 0.86));
+        const yOff = Math.max(8, Number(this.config.playZoneBottomOffset) || 26);
         this._webview.executeJavaScript("({w:window.innerWidth,h:window.innerHeight})")
           .then(dim => {
             if (!dim) return;
-            const px = Math.floor(dim.w * 0.62);       // rechts der Mitte
-            const py = Math.floor(dim.h - 28);         // Steuerleiste
+            const px = Math.floor(dim.w * xf);       // weiter rechts
+            const py = Math.floor(dim.h - yOff);     // an der Steuerleiste
             sendMouseClick(px, py, 1);
           }).catch(()=>{});
       } catch(_) {}
-    }, 360);
+    }, 150);
+
+    // 3) Taste Space/Enter als Reserve
+    setTimeout(() => sendKeyTap(" "), 320);
+    setTimeout(() => sendKeyTap("Enter"), 440);
   },
 
   // —— URL bauen / neu laden ——
@@ -232,6 +238,35 @@ Module.register("MMM-WetterOnlineRadar", {
       const u = this._buildRadarUrl();
       if (this._webview && typeof this._webview.loadURL === "function") this._webview.loadURL(u);
       else if (this._iframe) this._iframe.src = u;
+      // nach jedem Reload wieder 10s warten und EINMAL starten
+      if (this._webview) {
+        this._webview.addEventListener("did-finish-load", () => {
+          if (this._firstStartTimer) clearTimeout(this._firstStartTimer);
+          this._firstStartTimer = setTimeout(() => {
+            this._checkAndStart(async () => {
+              try {
+                await this._webview.executeJavaScript("window.__mmWROEmitPlayTarget && window.__mmWROEmitPlayTarget()");
+              } catch(_) {}
+              setTimeout(() => {
+                this._checkAndStart(() => this._forceStartFallback(
+                  (x,y,c)=>{ try {
+                    this._webview.focus();
+                    this._webview.sendInputEvent({ type:"mouseMove", x, y, movementX:0, movementY:0 });
+                    this._webview.sendInputEvent({ type:"mouseDown", x, y, button:"left", clickCount:c||1 });
+                    this._webview.sendInputEvent({ type:"mouseUp",   x, y, button:"left", clickCount:c||1 });
+                  } catch(e){}; },
+                  (k)=>{ try {
+                    this._webview.focus();
+                    this._webview.sendInputEvent({ type:"keyDown", keyCode:k });
+                    this._webview.sendInputEvent({ type:"char",    keyCode:k });
+                    this._webview.sendInputEvent({ type:"keyUp",   keyCode:k });
+                  } catch(e){}; }
+                ));
+              }, 500);
+            });
+          }, Math.max(0, this.config.firstStartDelay|0));
+        }, { once: true });
+      }
     }, this.config.reloadInterval);
   }
 });

@@ -1,6 +1,8 @@
 // Läuft im Kontext des WO-Radarframes.
-// Findet den echten Play-Button (auch in Shadow-DOM), prüft ob schon „Pause“ zu sehen ist,
-// meldet Koordinaten an den Host (der mit trusted Events klickt) und bietet Prüffunktionen.
+// Keine Autosuche/Autoklicks mehr. Stellt nur Hilfsfunktionen bereit:
+//  - __mmWROIsPlaying():  true/false
+//  - __mmWROEmitPlayTarget(): findet den Play-Button (auch Shadow DOM) und sendet Koordinaten
+//  - __mmWROKick(): nur für evtl. spätere Zwecke (CSS erneut setzen).
 
 (() => {
   const HIDE_CSS = `
@@ -104,37 +106,24 @@
   const { ipcRenderer } = require("electron");
   const emitTarget = (x, y) => { try { ipcRenderer.sendToHost("mm-wro-autoplay-target", { x, y }); } catch(_) {} };
 
-  const tryAutoplay = () => {
+  // —— Exporte ins Host-Fenster ——
+  window.__mmWROIsPlaying = () => { try { return !!isPlaying(); } catch(_) { return false; } };
+
+  window.__mmWROEmitPlayTarget = () => {
     try {
-      if (isPlaying()) return true;
+      injectCSS();
+      if (isPlaying()) return false;
       const btn = findPlayButton();
-      if (btn) { const { x, y } = center(btn); emitTarget(x, y); return true; }
-      return false;
+      if (!btn) return false;
+      const { x, y } = center(btn);
+      emitTarget(x, y);
+      return true;
     } catch (_) { return false; }
   };
 
-  const init = () => { injectCSS(); tryAutoplay(); };
+  window.__mmWROKick = () => { injectCSS(); return true; };
 
-  document.addEventListener('DOMContentLoaded', init);
-  window.addEventListener('load', init);
-
-  try {
-    const mo = new MutationObserver(() => { tryAutoplay(); });
-    mo.observe(document.documentElement, { childList: true, subtree: true });
-  } catch(_) {}
-
-  // frühe Versuche innerhalb der ersten ~20s
-  let early = 0;
-  const earlyIv = setInterval(() => {
-    early++;
-    init();
-    if (early >= 20) clearInterval(earlyIv);
-  }, 1000);
-
-  // Externe Hooks für den Host
-  window.__mmWROKick = () => { init(); };
-  window.__mmWROIsPlaying = () => { try { return !!isPlaying(); } catch(_) { return false; } };
-
-  // periodische Prüfung (Keep-Alive), Klick macht der Host erst nach Koordinaten
-  setInterval(() => { tryAutoplay(); }, 25000);
+  // gleich zu Beginn CSS setzen; KEINE Autoklicks!
+  document.addEventListener('DOMContentLoaded', injectCSS);
+  window.addEventListener('load', injectCSS);
 })();
