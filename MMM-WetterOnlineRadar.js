@@ -1,5 +1,5 @@
 /* MagicMirror² Module: MMM-WetterOnlineRadar
- * v1.3.0 — embeds ONLY the wo-cloud radar frame (no website chrome) and auto-starts the animation
+ * v1.1.0 — embeds ONLY the wo-cloud radar frame (no website chrome) and auto-starts the animation
  * Default: Berlin; README example uses Dresden.
  * License: MIT
  */
@@ -15,7 +15,7 @@ Module.register("MMM-WetterOnlineRadar", {
     zoomCss: 1.0,            // CSS scale for fine cropping
     useWebview: true,
     blockPointer: true,
-    autoPlay: true,          // <— NEU: versucht die Animation automatisch zu starten
+    autoPlay: true,          // versucht die Animation automatisch zu starten
     // Wenn du eine feste Frame-URL hast, kannst du die direkt setzen:
     radarFrameUrl: null,
     // UA override hilft einigen Electron-Builds
@@ -54,50 +54,115 @@ Module.register("MMM-WetterOnlineRadar", {
         try { wv.setUserAgentOverride(this.config.userAgent); } catch (e) {}
       }
 
-      // Autoplay: nach Load und wiederholt versuchen, Play zu triggern
+      // ————— Robustes Autoplay: tiefe Suche + echte Events + Keyboard-Fallbacks —————
       const tryStartJS = `
-        (function autoplayRadar(){
-          const clickCandidates = Array.from(document.querySelectorAll('button, a, [role="button"], .icon-button, .control, .controls, .toolbar, .timeline, .leaflet-control'));
-          const isPlay = el => {
-            const t = (el.innerText || el.textContent || '').toLowerCase();
-            const a = ((el.getAttribute('aria-label') || el.title) || '').toLowerCase();
-            return /(play|start|abspielen|animation|loop|wiedergabe|los)/.test(t) || /(play|start|abspielen|animation|loop|wiedergabe|los)/.test(a);
+        (function() {
+          const PLAY_PATTERNS = /(play|start|abspielen|animation|loop|wiedergabe|los|starten|autoplay|resume)/i;
+          const ICON_PATTERNS = /[▶►⯈⏵]/;
+
+          // Sichtbar?
+          const isVisible = el => {
+            if (!el) return false;
+            const r = el.getBoundingClientRect();
+            const style = window.getComputedStyle(el);
+            return r.width > 0 && r.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
           };
+
+          // Tiefe Query, inkl. Shadow-DOM
+          const deepQueryAll = (root, selector, out=[]) => {
+            try {
+              root.querySelectorAll(selector).forEach(n => out.push(n));
+            } catch(_) {}
+            const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, null, false);
+            let node = root;
+            while (node) {
+              if (node.shadowRoot) {
+                try { node.shadowRoot.querySelectorAll(selector).forEach(n => out.push(n)); } catch(_) {}
+                deepQueryAll(node.shadowRoot, selector, out);
+              }
+              node = walker.nextNode();
+            }
+            return out;
+          };
+
+          const textOf = el => {
+            const t = (el.innerText || el.textContent || '');
+            const aria = (el.getAttribute && (el.getAttribute('aria-label') || el.title || '')) || '';
+            const data = (el.getAttribute && (el.getAttribute('data-testid') || el.getAttribute('data-title') || '')) || '';
+            return (t + ' ' + aria + ' ' + data).trim();
+          };
+
+          const dispatchClickLike = el => {
+            const rect = el.getBoundingClientRect();
+            const x = Math.max(1, Math.floor(rect.left + rect.width/2));
+            const y = Math.max(1, Math.floor(rect.top + rect.height/2));
+            const opts = {bubbles:true, cancelable:true, clientX:x, clientY:y, pointerId:1};
+            try { el.dispatchEvent(new PointerEvent('pointerover', opts)); } catch(_) {}
+            try { el.dispatchEvent(new PointerEvent('pointerdown', opts)); } catch(_) {}
+            try { el.dispatchEvent(new MouseEvent('mousedown', opts)); } catch(_) {}
+            try { el.dispatchEvent(new PointerEvent('pointerup', opts)); } catch(_) {}
+            try { el.dispatchEvent(new MouseEvent('mouseup', opts)); } catch(_) {}
+            try { el.dispatchEvent(new MouseEvent('click', opts)); } catch(_) {}
+          };
+
+          // Kandidaten sammeln
+          const candidates = new Set();
+          deepQueryAll(document, 'button, a, [role="button"], .icon-button, .control, .controls, .toolbar, .timeline, .leaflet-control').forEach(el => {
+            const txt = textOf(el).toLowerCase();
+            if (PLAY_PATTERNS.test(txt) || ICON_PATTERNS.test(txt)) candidates.add(el);
+            // Material Icons?
+            if (!txt && el.querySelector && (el.querySelector('svg') || el.querySelector('i.material-icons'))) candidates.add(el);
+          });
+
+          // Wenn "Pause" auftaucht, spielt die Animation bereits → nichts tun
+          const pauseLike = Array.from(candidates).find(el => /pause|stopp|anhalten/i.test(textOf(el)));
+          if (pauseLike && isVisible(pauseLike)) return true;
+
           let clicked = false;
-          for (const el of clickCandidates) {
-            if (isPlay(el)) {
-              try {
-                el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-                clicked = true; break;
-              } catch(e){}
-            }
+          // sichtbare Kandidaten zuerst
+          for (const el of Array.from(candidates).filter(isVisible)) {
+            try { dispatchClickLike(el); clicked = true; break; } catch(_) {}
           }
-          // Fallback: einmal auf die Karte/timeline klicken (fokussieren) + Space
+
+          // Fallback: Timeline/Canvas fokussieren + Space/K/Enter
           if (!clicked) {
-            const canvas = document.querySelector('canvas');
-            if (canvas) {
-              try { canvas.dispatchEvent(new MouseEvent('click', { bubbles: true })); } catch(e){}
+            const canvas = document.querySelector('canvas') || document.querySelector('div[role="presentation"]');
+            if (canvas && isVisible(canvas)) {
+              try { dispatchClickLike(canvas); } catch(_) {}
             }
-            try { window.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true })); } catch(e){}
+            try { window.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true })); } catch(_) {}
+            try { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', code: 'KeyK', bubbles: true })); } catch(_) {}
+            try { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true })); } catch(_) {}
           }
+          return true;
         })();
       `;
 
       const scheduleTryStart = () => {
         if (!this.config.autoPlay) return;
-        // Sofort + einige Wiederholungen kurz nach dem Laden
-        try { wv.executeJavaScript(tryStartJS); } catch(e){}
-        let attempts = 0;
-        const iv = setInterval(() => {
-          attempts++;
-          try { wv.executeJavaScript(tryStartJS); } catch(e){}
-          if (attempts >= 10) clearInterval(iv); // ~10 Versuche in den ersten Sekunden
-        }, 1500);
-        // Danach alle 30s kurz anstupsen (falls Radar pausiert)
-        const keepAlive = setInterval(() => {
-          if (!this.config.autoPlay) { clearInterval(keepAlive); return; }
-          try { wv.executeJavaScript(tryStartJS); } catch(e){}
-        }, 30000);
+
+        // Sofort + eng getaktete Versuche (damit wir den Moment nach dem App-Init treffen)
+        const burst = (count, delay) => {
+          let n = 0;
+          const iv = setInterval(() => {
+            n++;
+            try { wv.executeJavaScript(tryStartJS); } catch(e){}
+            if (n >= count) clearInterval(iv);
+          }, delay);
+        };
+        // kleine Staffelung
+        setTimeout(() => { try { wv.executeJavaScript(tryStartJS); } catch(e){} }, 300);
+        burst(12, 1000);   // 12x jede Sekunde
+        setTimeout(() => burst(8, 1500), 1500);
+        setTimeout(() => burst(6, 2000), 3000);
+
+        // Danach Keep-Alive: alle 25s anstupsen (falls Radar pausiert)
+        if (!this._keepAliveTimer) {
+          this._keepAliveTimer = setInterval(() => {
+            if (!this.config.autoPlay) { clearInterval(this._keepAliveTimer); this._keepAliveTimer = null; return; }
+            try { wv.executeJavaScript(tryStartJS); } catch(e){}
+          }, 25000);
+        }
       };
 
       wv.addEventListener("dom-ready", () => scheduleTryStart());
@@ -108,6 +173,10 @@ Module.register("MMM-WetterOnlineRadar", {
         } catch(e){}
         scheduleTryStart();
       });
+
+      // Falls die App intern via History/Router neu lädt:
+      wv.addEventListener("did-navigate-in-page", () => scheduleTryStart());
+      wv.addEventListener("page-title-updated", () => scheduleTryStart());
 
       root.appendChild(wv);
       this._webview = wv;
