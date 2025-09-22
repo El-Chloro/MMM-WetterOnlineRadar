@@ -1,5 +1,5 @@
 /* MagicMirror² Module: MMM-WetterOnlineRadar
- * v1.1.0 — embeds ONLY the wo-cloud radar frame (no website chrome)
+ * v1.3.0 — embeds ONLY the wo-cloud radar frame (no website chrome) and auto-starts the animation
  * Default: Berlin; README example uses Dresden.
  * License: MIT
  */
@@ -15,9 +15,10 @@ Module.register("MMM-WetterOnlineRadar", {
     zoomCss: 1.0,            // CSS scale for fine cropping
     useWebview: true,
     blockPointer: true,
-    // If you know exactly which frame URL you want, set radarFrameUrl and it will be used as-is.
+    autoPlay: true,          // <— NEU: versucht die Animation automatisch zu starten
+    // Wenn du eine feste Frame-URL hast, kannst du die direkt setzen:
     radarFrameUrl: null,
-    // UA override helps some Electron builds
+    // UA override hilft einigen Electron-Builds
     userAgent:
       "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
   },
@@ -42,7 +43,7 @@ Module.register("MMM-WetterOnlineRadar", {
       wv.setAttribute("preload", this.file("preload.js"));
       wv.setAttribute("partition", "persist:mmm-wro");
       wv.setAttribute("allowpopups", "false");
-      // Keep web security ON; only UA override is used.
+      // Web Security bleibt AN; nur UA-Override wird verwendet.
       wv.style.width = "100%";
       wv.style.height = "100%";
       wv.style.border = "0";
@@ -52,14 +53,67 @@ Module.register("MMM-WetterOnlineRadar", {
       if (typeof wv.setUserAgentOverride === "function") {
         try { wv.setUserAgentOverride(this.config.userAgent); } catch (e) {}
       }
+
+      // Autoplay: nach Load und wiederholt versuchen, Play zu triggern
+      const tryStartJS = `
+        (function autoplayRadar(){
+          const clickCandidates = Array.from(document.querySelectorAll('button, a, [role="button"], .icon-button, .control, .controls, .toolbar, .timeline, .leaflet-control'));
+          const isPlay = el => {
+            const t = (el.innerText || el.textContent || '').toLowerCase();
+            const a = ((el.getAttribute('aria-label') || el.title) || '').toLowerCase();
+            return /(play|start|abspielen|animation|loop|wiedergabe|los)/.test(t) || /(play|start|abspielen|animation|loop|wiedergabe|los)/.test(a);
+          };
+          let clicked = false;
+          for (const el of clickCandidates) {
+            if (isPlay(el)) {
+              try {
+                el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                clicked = true; break;
+              } catch(e){}
+            }
+          }
+          // Fallback: einmal auf die Karte/timeline klicken (fokussieren) + Space
+          if (!clicked) {
+            const canvas = document.querySelector('canvas');
+            if (canvas) {
+              try { canvas.dispatchEvent(new MouseEvent('click', { bubbles: true })); } catch(e){}
+            }
+            try { window.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true })); } catch(e){}
+          }
+        })();
+      `;
+
+      const scheduleTryStart = () => {
+        if (!this.config.autoPlay) return;
+        // Sofort + einige Wiederholungen kurz nach dem Laden
+        try { wv.executeJavaScript(tryStartJS); } catch(e){}
+        let attempts = 0;
+        const iv = setInterval(() => {
+          attempts++;
+          try { wv.executeJavaScript(tryStartJS); } catch(e){}
+          if (attempts >= 10) clearInterval(iv); // ~10 Versuche in den ersten Sekunden
+        }, 1500);
+        // Danach alle 30s kurz anstupsen (falls Radar pausiert)
+        const keepAlive = setInterval(() => {
+          if (!this.config.autoPlay) { clearInterval(keepAlive); return; }
+          try { wv.executeJavaScript(tryStartJS); } catch(e){}
+        }, 30000);
+      };
+
+      wv.addEventListener("dom-ready", () => scheduleTryStart());
       wv.addEventListener("did-finish-load", () => {
+        // Scrollbar aus
         try {
           wv.executeJavaScript(`(function(){var s=document.createElement('style');s.textContent='*::-webkit-scrollbar{width:0;height:0}';document.documentElement.appendChild(s);}())`);
         } catch(e){}
+        scheduleTryStart();
       });
+
       root.appendChild(wv);
       this._webview = wv;
     } else {
+      // Hinweis: In iframe-Konfiguration kann kein Script in die Fremdseite injiziert werden (Same-Origin).
+      // Für Autoplay bitte useWebview:true lassen.
       const iframe = document.createElement("iframe");
       iframe.className = "wro-iframe";
       iframe.src = url;
