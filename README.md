@@ -1,4 +1,4 @@
-# MMM-WetterOnlineRadar (v1.2)
+# MMM-WetterOnlineRadar (v1.1)
 
 **Standard-Ort: Berlin** (intern über Koordinaten). In der `config.js` kannst du einen beliebigen Ort setzen.
 Die Einbettung nutzt **ausschließlich den WetterOnline Radar-Frame (wo-cloud)** – *ohne* restliche Website/Chromes/Popups.
