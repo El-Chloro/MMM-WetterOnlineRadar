@@ -1,12 +1,13 @@
-// Läuft im Kontext des geladenen Inhalts (wo-cloud Radarframe empfohlen).
-// Aufgabe: UI sauber halten + die Position des Play/Ripple-Buttons ermitteln
-// und an den Host senden, damit dieser „echte“ Clicks (sendInputEvent) ausführt.
+// Läuft im Kontext des wo-cloud Frames.
+// Aufgabe: UI säubern + den *richtigen* Play-Button finden.
+// Dann Koordinaten an den Host schicken, der mit „trusted“ Events klickt.
+// Keine blinden Klicks mehr in die Tab-Leiste („morgen“)!
 
 (() => {
-  // ---- Utility ----
   const HIDE_CSS = `
     html, body { background: transparent !important; overflow: hidden !important; margin:0!important; }
     *::-webkit-scrollbar{width:0;height:0}
+    /* Popups, Banner & CMP aggressiv ausblenden (nur sicherheitsrelevante Klassen/Begriffe) */
     header, footer, nav, .wo-Header, .wo-Footer, .footer, .header, .nav, .navbar,
     .ad, [id*="ad"], [class*="ad"], .banner, .cookie, [id*="cookie"], [class*="cookie"],
     [id*="consent"], [class*="consent"], [aria-label*="Cookie" i], [aria-label*="Cookies" i],
@@ -55,92 +56,93 @@
     return { x: Math.floor(r.left + r.width/2), y: Math.floor(r.top + r.height/2) };
   };
 
-  // ---- Ziel finden & Host informieren ----
-  const { ipcRenderer } = require("electron");
-
-  const emitTarget = (x, y) => {
-    try { ipcRenderer.sendToHost("mm-wro-autoplay-target", { x, y }); } catch(_) {}
+  // „läuft schon?“ → erkennbar, wenn ein sichtbarer Button „Pause/Stopp/Anhalten“ signalisiert
+  const isPlaying = () => {
+    const BTN = 'button, [role="button"], .mat-mdc-icon-button, .mat-icon-button, .icon-button, .timeline button, .controls button, .toolbar button';
+    return deepQueryAll(document, BTN)
+      .filter(isVisible)
+      .some(b => {
+        const text = ((b.innerText||b.textContent||'') + ' ' + (b.getAttribute?.('aria-label')||b.title||'')).toLowerCase();
+        return /pause|stopp|anhalten/.test(text);
+      });
   };
 
-  const tryFindAndEmitPlay = () => {
-    try {
-      // 0) Läuft es schon? „Pause“ sichtbar → nichts tun
-      const BTN = 'button, [role="button"], .mat-mdc-icon-button, .mat-icon-button, .icon-button, .timeline button, .controls button, .toolbar button';
-      const anyPause = deepQueryAll(document, BTN)
-        .some(b => /pause|stopp|anhalten/i.test(((b.innerText||b.textContent||'') + ' ' + (b.getAttribute?.('aria-label')||b.title||'')).toLowerCase()));
-      if (anyPause) return true;
+  const findPlayButton = () => {
+    const BTN = 'button, [role="button"], .mat-mdc-icon-button, .mat-icon-button, .icon-button, .timeline button, .controls button, .toolbar button';
 
-      // 1) Angular Material Ripple → auf den Button klicken lassen
-      const RIP = 'span.ng-ripple, .ng-ripple, span.ng-ripple.animate';
-      const ripples = deepQueryAll(document, RIP).filter(isVisible);
-      for (const r of ripples) {
-        const btn = r.closest(BTN);
-        if (btn && isVisible(btn)) {
-          const { x, y } = center(btn);
-          emitTarget(x, y);
-          return true;
-        }
+    // 1) semantische Labels (mehrsprachig)
+    const sema = [
+      'play','start','wiedergabe','abspielen','animation','starten'
+    ];
+    const semaSel = sema.map(s => `button[aria-label*="${s}" i], button[title*="${s}" i], [role="button"][aria-label*="${s}" i]`).join(',');
+    let candidates = deepQueryAll(document, semaSel).filter(isVisible);
+    if (candidates.length) return candidates[0];
+
+    // 2) Icon-Buttons mit Material-Icon „play_arrow“
+    const icons = deepQueryAll(document, '.mat-icon, i.material-icons, .material-icons').filter(isVisible);
+    for (const ic of icons) {
+      const t = (ic.innerText || ic.textContent || '').trim().toLowerCase();
+      if (t === 'play_arrow' || t === 'play' || t === 'start') {
+        const btn = ic.closest(BTN);
+        if (btn && isVisible(btn)) return btn;
       }
-
-      // 2) sonst: alle sichtbaren Buttons nach „play“-Semantik
-      const playLike = (el) => {
-        const txt  = (el.innerText||el.textContent||'').toLowerCase();
-        const aria = ((el.getAttribute && (el.getAttribute('aria-label')||el.title)) || '').toLowerCase();
-        if (/(play|start|abspielen|animation|loop|wiedergabe|starten)/i.test(txt)) return true;
-        if (/(play|start|abspielen|animation|loop|wiedergabe|starten)/i.test(aria)) return true;
-        if (!txt && !aria && (el.querySelector?.('svg') || el.querySelector?.('i.material-icons'))) return true;
-        return false;
-      };
-
-      const btns = deepQueryAll(document, BTN).filter(isVisible);
-      for (const b of btns) {
-        if (playLike(b)) {
-          const { x, y } = center(b);
-          emitTarget(x, y);
-          return true;
-        }
-      }
-
-      // 3) Fallback: Timeline/Canvas-Bereich links unten grob anvisieren
-      const cx = 72;
-      const cy = Math.floor(window.innerHeight * 0.90);
-      emitTarget(cx, cy);
-      return false;
-    } catch(_) {
-      return false;
     }
+
+    // 3) Angular-Ripple in Button-Hülle
+    const rip = deepQueryAll(document, 'span.ng-ripple, .ng-ripple, span.ng-ripple.animate').filter(isVisible);
+    for (const r of rip) {
+      const btn = r.closest(BTN);
+      if (btn && isVisible(btn)) return btn;
+    }
+
+    // 4) Heuristik: sichtbare Icon-Buttons rechts unten nach dem Slider-Block
+    const allBtns = deepQueryAll(document, BTN).filter(isVisible);
+    // Buttons nahe der unteren 20% des Viewports bevorzugen
+    const h = window.innerHeight || 0;
+    const bottomBtns = allBtns.filter(b => b.getBoundingClientRect().top > h * 0.78);
+    if (bottomBtns.length) return bottomBtns[0];
+
+    return null;
   };
 
-  // ---- Initialisierung & Beobachtung ----
-  const kick = () => { injectCSS(); tryFindAndEmitPlay(); };
+  const { ipcRenderer } = require("electron");
+  const emitTarget = (x, y) => { try { ipcRenderer.sendToHost("mm-wro-autoplay-target", { x, y }); } catch(_) {} };
 
-  document.addEventListener('DOMContentLoaded', kick);
-  window.addEventListener('load', kick);
+  const tryAutoplay = () => {
+    try {
+      if (isPlaying()) return true;       // läuft schon → nichts tun
+      const btn = findPlayButton();
+      if (btn) {
+        const { x, y } = center(btn);
+        emitTarget(x, y);
+        return true;
+      }
+      return false;
+    } catch (_) { return false; }
+  };
 
-  // UI ist SPA → auf spätes Laden warten
+  const init = () => { injectCSS(); tryAutoplay(); };
+
+  document.addEventListener('DOMContentLoaded', init);
+  window.addEventListener('load', init);
+
+  // SPA: auf spätes UI warten
   try {
-    const mo = new MutationObserver((muts) => {
-      const hit = muts.some(m =>
-        Array.from(m.addedNodes||[]).some(n =>
-          n.nodeType === 1 && (
-            n.matches?.('span.ng-ripple, .ng-ripple, span.ng-ripple.animate') ||
-            n.matches?.('button, [role="button"], .mat-mdc-icon-button, .mat-icon-button, .icon-button') ||
-            n.querySelector?.('span.ng-ripple, .ng-ripple, span.ng-ripple.animate, button, [role="button"], .mat-mdc-icon-button, .mat-icon-button, .icon-button')
-          )
-        )
-      );
-      if (hit) tryFindAndEmitPlay();
-    });
+    const mo = new MutationObserver(() => { tryAutoplay(); });
     mo.observe(document.documentElement, { childList: true, subtree: true });
   } catch(_) {}
 
-  // mehrere Startversuche am Anfang (erste 20s), dann Keep-Alive alle 25s
+  // Frühe Versuche (erste ~20s)
   let early = 0;
   const earlyIv = setInterval(() => {
     early++;
-    kick();
+    init();
     if (early >= 20) clearInterval(earlyIv);
   }, 1000);
 
-  setInterval(() => kick(), 25000);
+  // Extern anstoßbar (vom Host)
+  window.__mmWROKick = () => { init(); };
+
+  // Keep-Alive: nur prüfen, nicht blind klicken (der Host klickt erst nach Koordinaten)
+  setInterval(() => { tryAutoplay(); }, 25000);
 })();
