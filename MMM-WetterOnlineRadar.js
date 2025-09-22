@@ -1,36 +1,39 @@
 /* MagicMirror² Module: MMM-WetterOnlineRadar
- * v1.6.0 — lädt NUR den wo-cloud Radar-Frame und startet die Animation zuverlässig
- * Default: Berlin; Koordinaten/Zoom aus config werden korrekt beachtet.
+ * v1.6.1 — startet die WO-Radar-Animation robust (Klick, Key, Play-Zone-Fallback)
  * License: MIT
  */
 Module.register("MMM-WetterOnlineRadar", {
   defaults: {
-    // Standard: Berlin
+    // Standardort (Berlin) – wird von coords überschrieben:
     coords: { lat: 52.5200, lon: 13.4050 },
     zoomLevel: 8,                 // wo-cloud: 6..12 üblich
-    // Optional: feste URL (überschreibt coords/zoomLevel)
+    // Optional: feste URL (überschreibt coords/zoomLevel komplett):
     url: null,
 
     reloadInterval: 15 * 60 * 1000,
     width: "560px",
     height: "360px",
-    zoomCss: 1.0,                 // CSS-Scale (feines Cropping)
-    useWebview: true,             // MUSS true sein, damit „trusted“ Input-Events gehen
+    zoomCss: 1.0,                 // CSS-Scale (Feincropping)
+    useWebview: true,             // MUSS true sein für trusted input events
     blockPointer: true,
     autoPlay: true,
 
-    // User-Agent für robustes Laden im Electron
     userAgent:
       "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
 
-    // Wie oft wir den Preload bitten, „schau mal ob Play nötig ist“:
-    keepAliveMs: 25000
+    // Wie oft wir die „läuft schon?“-Prüfung + ggf. Start anstoßen:
+    keepAliveMs: 25000,
+
+    // Wieviele Startversuche in den ersten Sekunden (je 1 Sek.)?
+    earlyTries: 20
   },
 
   start() {
     this._reloadTimer = null;
     this._keepAliveTimer = null;
     this._webview = null;
+    this._earlyTryCount = 0;
+    this._earlyTimer = null;
   },
 
   getStyles() { return [this.file("styles.css")]; },
@@ -65,15 +68,13 @@ Module.register("MMM-WetterOnlineRadar", {
         try { wv.setUserAgentOverride(this.config.userAgent); } catch (e) {}
       }
 
-      // --- Trusted Input vom Host in den Webview ---
-      const sendMouseClick = (x, y) => {
+      // —— Trusted Input vom Host in den Webview ——
+      const sendMouseClick = (x, y, clickCount = 1) => {
         try {
           wv.focus();
-          // kleiner Hover-Impuls
           wv.sendInputEvent({ type: "mouseMove", x, y, movementX: 0, movementY: 0 });
-          // echter Klick
-          wv.sendInputEvent({ type: "mouseDown", x, y, button: "left", clickCount: 1 });
-          wv.sendInputEvent({ type: "mouseUp",   x, y, button: "left", clickCount: 1 });
+          wv.sendInputEvent({ type: "mouseDown", x, y, button: "left", clickCount });
+          wv.sendInputEvent({ type: "mouseUp",   x, y, button: "left", clickCount });
         } catch (e) {}
       };
       const sendKeyTap = (key) => {
@@ -85,36 +86,49 @@ Module.register("MMM-WetterOnlineRadar", {
         } catch (e) {}
       };
 
-      // Preload meldet „hier ist der Play-Button“
+      // gezielter Start, wenn der Preload den Button gefunden hat
       wv.addEventListener("ipc-message", (ev) => {
         if (ev.channel === "mm-wro-autoplay-target" && this.config.autoPlay) {
           const { x, y } = ev.args[0] || {};
           if (typeof x === "number" && typeof y === "number") {
-            // gezielt NUR den Play-Button treffen (kein Fallback-Klick unten links mehr!)
-            sendMouseClick(x, y);
-            // kleiner Key-Fallback, falls der Klick mal „verschluckt“ wird
-            setTimeout(() => sendKeyTap(" "), 200);
+            this._checkAndStart(() => {
+              // Fokus neutral setzen (Center-Klick), dann gezielt Play klicken
+              this._focusCenter(sendMouseClick);
+              setTimeout(() => sendMouseClick(x, y, 1), 120);
+              setTimeout(() => sendKeyTap(" "), 260);   // falls Click „verschluckt“ wird
+            });
           }
         }
       });
 
       const kickDetection = () => {
-        // Preload anstupsen: „schau mal, ob Play nötig ist“
         try { wv.executeJavaScript("window.__mmWROKick && window.__mmWROKick()"); } catch (e) {}
+        // zusätzlich Host-seitige Prüfung & Startsequenz
+        this._checkAndStart(() => this._forceStartSequence(sendMouseClick, sendKeyTap));
       };
 
       wv.addEventListener("dom-ready", kickDetection);
       wv.addEventListener("did-finish-load", () => {
-        // Scrollbars weg
         try {
           wv.executeJavaScript(`(function(){var s=document.createElement('style');s.textContent='*::-webkit-scrollbar{width:0;height:0}';document.documentElement.appendChild(s);}())`);
         } catch(e){}
         kickDetection();
+        // frühe, wiederholte Versuche (1x pro Sekunde)
+        if (this._earlyTimer) clearInterval(this._earlyTimer);
+        this._earlyTryCount = 0;
+        this._earlyTimer = setInterval(() => {
+          this._earlyTryCount++;
+          this._checkAndStart(() => this._forceStartSequence(sendMouseClick, sendKeyTap));
+          if (this._earlyTryCount >= (this.config.earlyTries|0 || 20)) {
+            clearInterval(this._earlyTimer);
+            this._earlyTimer = null;
+          }
+        }, 1000);
       });
       wv.addEventListener("did-navigate-in-page", kickDetection);
       wv.addEventListener("page-title-updated",   kickDetection);
 
-      // Keep-Alive nur noch als „Kick“ (keine blinden Klicks/Keys)
+      // Keep-Alive
       if (!this._keepAliveTimer && this.config.keepAliveMs > 0) {
         this._keepAliveTimer = setInterval(kickDetection, this.config.keepAliveMs);
       }
@@ -122,7 +136,7 @@ Module.register("MMM-WetterOnlineRadar", {
       root.appendChild(wv);
       this._webview = wv;
     } else {
-      // Hinweis: In iframe können wir keine „trusted“ Events schicken → Autoplay unsicher
+      // Hinweis: in <iframe> sind trusted Events nicht möglich → Autoplay unsicher
       const iframe = document.createElement("iframe");
       iframe.className = "wro-iframe";
       iframe.src = url;
@@ -143,12 +157,58 @@ Module.register("MMM-WetterOnlineRadar", {
     return root;
   },
 
+  // —— Hilfsroutinen: „läuft schon?“ prüfen & falls nötig starten ——
+  _checkAndStart(doStart) {
+    if (!this._webview || !this.config.autoPlay) return;
+    try {
+      this._webview.executeJavaScript(
+        "(window.__mmWROIsPlaying && window.__mmWROIsPlaying())"
+      ).then((isPlaying) => {
+        if (!isPlaying) doStart && doStart();
+      }).catch(()=>{ doStart && doStart(); });
+    } catch (_) { doStart && doStart(); }
+  },
+
+  _focusCenter(sendMouseClick) {
+    // neutraler Klick mitten in die Karte, gibt Fokus ohne Tabs/Buttons zu treffen
+    try {
+      this._webview.executeJavaScript("({w:window.innerWidth,h:window.innerHeight})")
+        .then(dim => {
+          if (!dim) return;
+          const cx = Math.floor(dim.w * 0.5);
+          const cy = Math.floor(dim.h * 0.5);
+          sendMouseClick(cx, cy, 1);
+        }).catch(()=>{});
+    } catch(_) {}
+  },
+
+  _forceStartSequence(sendMouseClick, sendKeyTap) {
+    // 1) Fokus in die Karte
+    this._focusCenter(sendMouseClick);
+
+    // 2) Key-Fallback
+    setTimeout(() => sendKeyTap(" "), 120);
+    setTimeout(() => sendKeyTap("Enter"), 240);
+
+    // 3) Klick in die „Play-Zone“ rechts unten (sicher weg von den Tabs)
+    setTimeout(() => {
+      try {
+        this._webview.executeJavaScript("({w:window.innerWidth,h:window.innerHeight})")
+          .then(dim => {
+            if (!dim) return;
+            const px = Math.floor(dim.w * 0.62);       // rechts der Mitte
+            const py = Math.floor(dim.h - 28);         // Steuerleiste
+            sendMouseClick(px, py, 1);
+          }).catch(()=>{});
+      } catch(_) {}
+    }, 360);
+  },
+
+  // —— URL bauen / neu laden ——
   _buildRadarUrl() {
-    // 1) explizite URL aus config hat Vorrang
     if (this.config.url && typeof this.config.url === "string") {
       return this._cacheBusted(this.config.url);
     }
-    // 2) aus Koordinaten bauen (wo-cloud compact frame)
     const { coords, zoomLevel } = this.config;
     const lat = (coords && typeof coords.lat === "number") ? coords.lat : 52.52;
     const lon = (coords && typeof coords.lon === "number") ? coords.lon : 13.405;

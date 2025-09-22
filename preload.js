@@ -1,19 +1,18 @@
-// Läuft im Kontext des wo-cloud Frames.
-// Aufgabe: UI säubern + den *richtigen* Play-Button finden.
-// Dann Koordinaten an den Host schicken, der mit „trusted“ Events klickt.
-// Keine blinden Klicks mehr in die Tab-Leiste („morgen“)!
+// Läuft im Kontext des WO-Radarframes.
+// Findet den echten Play-Button (auch in Shadow-DOM), prüft ob schon „Pause“ zu sehen ist,
+// meldet Koordinaten an den Host (der mit trusted Events klickt) und bietet Prüffunktionen.
 
 (() => {
   const HIDE_CSS = `
     html, body { background: transparent !important; overflow: hidden !important; margin:0!important; }
     *::-webkit-scrollbar{width:0;height:0}
-    /* Popups, Banner & CMP aggressiv ausblenden (nur sicherheitsrelevante Klassen/Begriffe) */
-    header, footer, nav, .wo-Header, .wo-Footer, .footer, .header, .nav, .navbar,
-    .ad, [id*="ad"], [class*="ad"], .banner, .cookie, [id*="cookie"], [class*="cookie"],
+    header, footer, nav, .wo-Header, .wo-Footer,
+    .ad, [id*="ad"], [class*="ad"], .banner,
+    .cookie, [id*="cookie"], [class*="cookie"],
     [id*="consent"], [class*="consent"], [aria-label*="Cookie" i], [aria-label*="Cookies" i],
-    .modal, .popup, .overlay, .dialog, .backdrop, .newsletter, .qrcode, .share, .social,
+    .modal, .popup, .overlay, .dialog, .backdrop,
     .wo-AppInstall, .wo-AppBanner, .wo-MemberPrompt, .wo-LoginPrompt, .wo-Modal, .wo-Layer,
-    .app-download, .tracking-consent, .consent, .notice, .privacy, .gdpr, .cmp-ui, .cmp-layer {
+    .tracking-consent, .gdpr, .cmp-ui, .cmp-layer {
       display: none !important; visibility: hidden !important; opacity: 0 !important;
     }
   `;
@@ -56,29 +55,27 @@
     return { x: Math.floor(r.left + r.width/2), y: Math.floor(r.top + r.height/2) };
   };
 
-  // „läuft schon?“ → erkennbar, wenn ein sichtbarer Button „Pause/Stopp/Anhalten“ signalisiert
+  // „läuft schon?“ → sichtbarer Button mit Pause/Stopp/Anhalten
   const isPlaying = () => {
     const BTN = 'button, [role="button"], .mat-mdc-icon-button, .mat-icon-button, .icon-button, .timeline button, .controls button, .toolbar button';
     return deepQueryAll(document, BTN)
       .filter(isVisible)
       .some(b => {
         const text = ((b.innerText||b.textContent||'') + ' ' + (b.getAttribute?.('aria-label')||b.title||'')).toLowerCase();
-        return /pause|stopp|anhalten/.test(text);
+        return /pause|stopp|stop|anhalten/.test(text);
       });
   };
 
   const findPlayButton = () => {
     const BTN = 'button, [role="button"], .mat-mdc-icon-button, .mat-icon-button, .icon-button, .timeline button, .controls button, .toolbar button';
 
-    // 1) semantische Labels (mehrsprachig)
-    const sema = [
-      'play','start','wiedergabe','abspielen','animation','starten'
-    ];
+    // 1) Semantik (de+en)
+    const sema = ['play','start','wiedergabe','abspielen','animation','starten'];
     const semaSel = sema.map(s => `button[aria-label*="${s}" i], button[title*="${s}" i], [role="button"][aria-label*="${s}" i]`).join(',');
     let candidates = deepQueryAll(document, semaSel).filter(isVisible);
     if (candidates.length) return candidates[0];
 
-    // 2) Icon-Buttons mit Material-Icon „play_arrow“
+    // 2) Material-Icons
     const icons = deepQueryAll(document, '.mat-icon, i.material-icons, .material-icons').filter(isVisible);
     for (const ic of icons) {
       const t = (ic.innerText || ic.textContent || '').trim().toLowerCase();
@@ -88,16 +85,15 @@
       }
     }
 
-    // 3) Angular-Ripple in Button-Hülle
+    // 3) Ripple innerhalb von Buttons
     const rip = deepQueryAll(document, 'span.ng-ripple, .ng-ripple, span.ng-ripple.animate').filter(isVisible);
     for (const r of rip) {
       const btn = r.closest(BTN);
       if (btn && isVisible(btn)) return btn;
     }
 
-    // 4) Heuristik: sichtbare Icon-Buttons rechts unten nach dem Slider-Block
+    // 4) Heuristik: sichtbare Buttons nah am unteren Rand
     const allBtns = deepQueryAll(document, BTN).filter(isVisible);
-    // Buttons nahe der unteren 20% des Viewports bevorzugen
     const h = window.innerHeight || 0;
     const bottomBtns = allBtns.filter(b => b.getBoundingClientRect().top > h * 0.78);
     if (bottomBtns.length) return bottomBtns[0];
@@ -110,13 +106,9 @@
 
   const tryAutoplay = () => {
     try {
-      if (isPlaying()) return true;       // läuft schon → nichts tun
+      if (isPlaying()) return true;
       const btn = findPlayButton();
-      if (btn) {
-        const { x, y } = center(btn);
-        emitTarget(x, y);
-        return true;
-      }
+      if (btn) { const { x, y } = center(btn); emitTarget(x, y); return true; }
       return false;
     } catch (_) { return false; }
   };
@@ -126,13 +118,12 @@
   document.addEventListener('DOMContentLoaded', init);
   window.addEventListener('load', init);
 
-  // SPA: auf spätes UI warten
   try {
     const mo = new MutationObserver(() => { tryAutoplay(); });
     mo.observe(document.documentElement, { childList: true, subtree: true });
   } catch(_) {}
 
-  // Frühe Versuche (erste ~20s)
+  // frühe Versuche innerhalb der ersten ~20s
   let early = 0;
   const earlyIv = setInterval(() => {
     early++;
@@ -140,9 +131,10 @@
     if (early >= 20) clearInterval(earlyIv);
   }, 1000);
 
-  // Extern anstoßbar (vom Host)
+  // Externe Hooks für den Host
   window.__mmWROKick = () => { init(); };
+  window.__mmWROIsPlaying = () => { try { return !!isPlaying(); } catch(_) { return false; } };
 
-  // Keep-Alive: nur prüfen, nicht blind klicken (der Host klickt erst nach Koordinaten)
+  // periodische Prüfung (Keep-Alive), Klick macht der Host erst nach Koordinaten
   setInterval(() => { tryAutoplay(); }, 25000);
 })();
