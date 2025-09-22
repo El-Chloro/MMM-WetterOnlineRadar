@@ -1,22 +1,35 @@
-// Läuft im Kontext des wo-cloud Frames (webview preload)
+// Läuft im Kontext des geladenen Inhalts (wo-cloud Radarframe empfohlen).
+// Aufgabe: UI sauber halten + die Position des Play/Ripple-Buttons ermitteln
+// und an den Host senden, damit dieser „echte“ Clicks (sendInputEvent) ausführt.
+
 (() => {
-  const addBaseCSS = () => {
-    if (!document.querySelector('style[data-mm-wro]')) {
-      const s = document.createElement('style');
-      s.type = 'text/css';
-      s.setAttribute('data-mm-wro', '1');
-      s.textContent = `
-        html,body{background:transparent !important;overflow:hidden !important;margin:0!important;padding:0!important}
-        *::-webkit-scrollbar{width:0;height:0}
-      `;
-      (document.head || document.documentElement).appendChild(s);
+  // ---- Utility ----
+  const HIDE_CSS = `
+    html, body { background: transparent !important; overflow: hidden !important; margin:0!important; }
+    *::-webkit-scrollbar{width:0;height:0}
+    header, footer, nav, .wo-Header, .wo-Footer, .footer, .header, .nav, .navbar,
+    .ad, [id*="ad"], [class*="ad"], .banner, .cookie, [id*="cookie"], [class*="cookie"],
+    [id*="consent"], [class*="consent"], [aria-label*="Cookie" i], [aria-label*="Cookies" i],
+    .modal, .popup, .overlay, .dialog, .backdrop, .newsletter, .qrcode, .share, .social,
+    .wo-AppInstall, .wo-AppBanner, .wo-MemberPrompt, .wo-LoginPrompt, .wo-Modal, .wo-Layer,
+    .app-download, .tracking-consent, .consent, .notice, .privacy, .gdpr, .cmp-ui, .cmp-layer {
+      display: none !important; visibility: hidden !important; opacity: 0 !important;
     }
+  `;
+
+  const injectCSS = () => {
+    try {
+      if (!document.querySelector('style[data-mm-wro]')) {
+        const s = document.createElement('style');
+        s.type = 'text/css';
+        s.setAttribute('data-mm-wro','1');
+        s.textContent = HIDE_CSS;
+        (document.head || document.documentElement).appendChild(s);
+      }
+    } catch(_) {}
   };
 
-  const SEL_BTN = 'button, [role="button"], .mat-mdc-icon-button, .mat-icon-button, .icon-button, .timeline button, .controls button, .toolbar button';
-  const SEL_RIPPLE = 'span.ng-ripple, .ng-ripple, span.ng-ripple.animate';
-
-  const isVisible = el => {
+  const isVisible = (el) => {
     if (!el) return false;
     const r = el.getBoundingClientRect();
     const cs = window.getComputedStyle(el);
@@ -37,109 +50,97 @@
     return out;
   };
 
-  const dispatchCombo = (el, biasEl) => {
-    const rect = el.getBoundingClientRect();
-    const bx = Math.floor(rect.left + rect.width/2);
-    const by = Math.floor(rect.top + rect.height/2);
-    const tryPoint = (x, y) => {
-      const opts = {bubbles:true, cancelable:true, clientX:x, clientY:y, pointerId:1, composed:true};
-      try { el.dispatchEvent(new PointerEvent('pointerover', opts)); } catch(_) {}
-      try { el.dispatchEvent(new PointerEvent('pointerdown', opts)); } catch(_) {}
-      try { el.dispatchEvent(new MouseEvent('mousedown', opts)); } catch(_) {}
-      try { el.dispatchEvent(new PointerEvent('pointerup', opts)); } catch(_) {}
-      try { el.dispatchEvent(new MouseEvent('mouseup', opts)); } catch(_) {}
-      try { el.dispatchEvent(new MouseEvent('click', opts)); } catch(_) {}
-    };
-    // Button-Mitte
-    tryPoint(bx, by);
-    // zusätzlich direkt auf die Mittelpunkt-Koordinate des Ripple
-    if (biasEl && biasEl !== el && biasEl.getBoundingClientRect) {
-      const rr = biasEl.getBoundingClientRect();
-      const rx = Math.floor(rr.left + rr.width/2);
-      const ry = Math.floor(rr.top + rr.height/2);
-      tryPoint(rx, ry);
-    }
+  const center = (el) => {
+    const r = el.getBoundingClientRect();
+    return { x: Math.floor(r.left + r.width/2), y: Math.floor(r.top + r.height/2) };
   };
 
-  const playLike = (el) => {
-    const txt = (el.innerText || el.textContent || '').toLowerCase();
-    const aria = ((el.getAttribute && (el.getAttribute('aria-label') || el.title)) || '').toLowerCase();
-    if (/(play|start|abspielen|animation|loop|wiedergabe|starten)/i.test(txt) ||
-        /(play|start|abspielen|animation|loop|wiedergabe|starten)/i.test(aria)) return true;
-    if (!txt && !aria) {
-      if (el.querySelector && (el.querySelector('svg') || el.querySelector('i.material-icons'))) return true;
-    }
-    return false;
+  // ---- Ziel finden & Host informieren ----
+  const { ipcRenderer } = require("electron");
+
+  const emitTarget = (x, y) => {
+    try { ipcRenderer.sendToHost("mm-wro-autoplay-target", { x, y }); } catch(_) {}
   };
 
-  const tryStart = () => {
+  const tryFindAndEmitPlay = () => {
     try {
-      // Wenn „Pause“ sichtbar ist, läuft’s bereits
-      const anyPause = deepQueryAll(document, SEL_BTN)
-        .some(b => /pause|stopp|anhalten/i.test((b.innerText||b.textContent||'') + ' ' + ((b.getAttribute && (b.getAttribute('aria-label')||b.title))||'')));
+      // 0) Läuft es schon? „Pause“ sichtbar → nichts tun
+      const BTN = 'button, [role="button"], .mat-mdc-icon-button, .mat-icon-button, .icon-button, .timeline button, .controls button, .toolbar button';
+      const anyPause = deepQueryAll(document, BTN)
+        .some(b => /pause|stopp|anhalten/i.test(((b.innerText||b.textContent||'') + ' ' + (b.getAttribute?.('aria-label')||b.title||'')).toLowerCase()));
       if (anyPause) return true;
 
-      // 1) Ripple → Button
-      const ripples = deepQueryAll(document, SEL_RIPPLE).filter(isVisible);
+      // 1) Angular Material Ripple → auf den Button klicken lassen
+      const RIP = 'span.ng-ripple, .ng-ripple, span.ng-ripple.animate';
+      const ripples = deepQueryAll(document, RIP).filter(isVisible);
       for (const r of ripples) {
-        const btn = r.closest(SEL_BTN);
-        if (btn && isVisible(btn)) { dispatchCombo(btn, r); return true; }
+        const btn = r.closest(BTN);
+        if (btn && isVisible(btn)) {
+          const { x, y } = center(btn);
+          emitTarget(x, y);
+          return true;
+        }
       }
 
-      // 2) sichtbare Play-Buttons
-      const btns = deepQueryAll(document, SEL_BTN).filter(isVisible);
+      // 2) sonst: alle sichtbaren Buttons nach „play“-Semantik
+      const playLike = (el) => {
+        const txt  = (el.innerText||el.textContent||'').toLowerCase();
+        const aria = ((el.getAttribute && (el.getAttribute('aria-label')||el.title)) || '').toLowerCase();
+        if (/(play|start|abspielen|animation|loop|wiedergabe|starten)/i.test(txt)) return true;
+        if (/(play|start|abspielen|animation|loop|wiedergabe|starten)/i.test(aria)) return true;
+        if (!txt && !aria && (el.querySelector?.('svg') || el.querySelector?.('i.material-icons'))) return true;
+        return false;
+      };
+
+      const btns = deepQueryAll(document, BTN).filter(isVisible);
       for (const b of btns) {
-        if (playLike(b)) { dispatchCombo(b, null); return true; }
+        if (playLike(b)) {
+          const { x, y } = center(b);
+          emitTarget(x, y);
+          return true;
+        }
       }
 
-      // 3) Fallback: Canvas + Keys
-      const canvas = document.querySelector('canvas') || document.querySelector('div[role="presentation"]');
-      if (canvas && isVisible(canvas)) {
-        try {
-          const rc = canvas.getBoundingClientRect();
-          const x = Math.floor(rc.left + rc.width * 0.15);
-          const y = Math.floor(rc.top + rc.height * 0.85);
-          const opts = {bubbles:true, cancelable:true, clientX:x, clientY:y, pointerId:1, composed:true};
-          canvas.dispatchEvent(new PointerEvent('pointerdown', opts));
-          canvas.dispatchEvent(new MouseEvent('mousedown', opts));
-          canvas.dispatchEvent(new PointerEvent('pointerup', opts));
-          canvas.dispatchEvent(new MouseEvent('mouseup', opts));
-          canvas.dispatchEvent(new MouseEvent('click', opts));
-        } catch(_) {}
-      }
-      try { window.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true})); } catch(_) {}
-      try { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true})); } catch(_) {}
-
+      // 3) Fallback: Timeline/Canvas-Bereich links unten grob anvisieren
+      const cx = 72;
+      const cy = Math.floor(window.innerHeight * 0.90);
+      emitTarget(cx, cy);
       return false;
-    } catch (e) { return false; }
+    } catch(_) {
+      return false;
+    }
   };
 
-  const init = () => { addBaseCSS(); tryStart(); };
+  // ---- Initialisierung & Beobachtung ----
+  const kick = () => { injectCSS(); tryFindAndEmitPlay(); };
 
-  document.addEventListener('DOMContentLoaded', init);
-  window.addEventListener('load', init);
+  document.addEventListener('DOMContentLoaded', kick);
+  window.addEventListener('load', kick);
 
-  // UI kommt dynamisch → bei Änderungen erneut versuchen
+  // UI ist SPA → auf spätes Laden warten
   try {
     const mo = new MutationObserver((muts) => {
-      // nur reagieren, wenn Ripple/Buttons beteiligt sind → schneller
       const hit = muts.some(m =>
-        Array.from(m.addedNodes || []).some(n =>
-          n.nodeType === 1 && (n.matches?.(SEL_RIPPLE) || n.matches?.(SEL_BTN) || n.querySelector?.(SEL_RIPPLE) || n.querySelector?.(SEL_BTN))
+        Array.from(m.addedNodes||[]).some(n =>
+          n.nodeType === 1 && (
+            n.matches?.('span.ng-ripple, .ng-ripple, span.ng-ripple.animate') ||
+            n.matches?.('button, [role="button"], .mat-mdc-icon-button, .mat-icon-button, .icon-button') ||
+            n.querySelector?.('span.ng-ripple, .ng-ripple, span.ng-ripple.animate, button, [role="button"], .mat-mdc-icon-button, .mat-icon-button, .icon-button')
+          )
         )
       );
-      if (hit) tryStart();
+      if (hit) tryFindAndEmitPlay();
     });
-    mo.observe(document.documentElement, {childList:true, subtree:true});
+    mo.observe(document.documentElement, { childList: true, subtree: true });
   } catch(_) {}
 
-  // Eng getaktete Frühversuche + periodisches Keep-Alive
+  // mehrere Startversuche am Anfang (erste 20s), dann Keep-Alive alle 25s
   let early = 0;
   const earlyIv = setInterval(() => {
     early++;
-    init();
-    if (early >= 20) clearInterval(earlyIv); // ~20 Sekunden
+    kick();
+    if (early >= 20) clearInterval(earlyIv);
   }, 1000);
 
-  setInterval(() => { tryStart(); }, 25000);
+  setInterval(() => kick(), 25000);
 })();
