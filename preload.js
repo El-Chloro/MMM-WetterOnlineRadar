@@ -192,15 +192,28 @@
 
   const injectCSS = () => {
     try {
-      if (!document.querySelector('style[data-mm-wro]')) {
-        const s = document.createElement('style');
-        s.type = 'text/css';
-        s.setAttribute('data-mm-wro','1');
-        s.textContent = HIDE_CSS;
-        (document.head || document.documentElement).appendChild(s);
+      const existing = document.querySelector('style[data-mm-wro]');
+      if (existing) {
+        existing.textContent = HIDE_CSS;
+        return;
       }
+      const s = document.createElement('style');
+      s.type = 'text/css';
+      s.setAttribute('data-mm-wro','1');
+      s.textContent = HIDE_CSS;
+      (document.head || document.documentElement).appendChild(s);
     } catch(_) {}
   };
+
+  const scheduleCssRefresh = () => {
+    try {
+      if (window.__mmWROCssRefreshTimer) clearTimeout(window.__mmWROCssRefreshTimer);
+      window.__mmWROCssRefreshTimer = setTimeout(injectCSS, 10000);
+    } catch(_) {
+      setTimeout(injectCSS, 10000);
+    }
+  };
+
 
   const isVisible = (el) => {
     if (!el) return false;
@@ -283,6 +296,7 @@
   window.__mmWROEmitPlayTarget = () => {
     try {
       injectCSS();
+      scheduleCssRefresh();
       if (isPlaying()) return false;
       const btn = findPlayButton();
       if (!btn) return false;
@@ -292,9 +306,14 @@
     } catch (_) { return false; }
   };
 
-  window.__mmWROKick = () => { injectCSS(); return true; };
+  window.__mmWROKick = () => { injectCSS(); scheduleCssRefresh(); return true; };
 
   // gleich zu Beginn CSS setzen; KEINE Autoklicks!
-  document.addEventListener('DOMContentLoaded', injectCSS);
-  window.addEventListener('load', injectCSS);
+  const initialCss = () => {
+    injectCSS();
+    scheduleCssRefresh();
+  };
+
+  document.addEventListener('DOMContentLoaded', initialCss);
+  window.addEventListener('load', initialCss);
 })();
