@@ -17,10 +17,35 @@
     .tracking-consent, .gdpr, .cmp-ui, .cmp-layer {
       display: none !important; visibility: hidden !important; opacity: 0 !important;
     }
+
     :root,
     body,
-    .wo-RadarFrame,
-    .wo-RadarFrame * {
+    wo-desktop-compact,
+    wo-desktop-compact *,
+    wo-control-container,
+    wo-control-container *,
+    wo-base-control,
+    wo-base-control *,
+    wo-info-label,
+    wo-info-label *,
+    wo-layer-toggle,
+    wo-layer-toggle *,
+    wo-play-pause-control,
+    wo-play-pause-control *,
+    wo-time-label,
+    wo-time-label *,
+    wo-toggle,
+    wo-toggle *,
+    wo-controls,
+    wo-controls *,
+    wo-time-control,
+    wo-time-control *,
+    .btn,
+    .btn * {
+      --control-background: #111 !important;
+      --control-active-background: #222 !important;
+      --control-border: 1px solid #111 !important;
+      --control-border-radius: 2px !important;
       --wo-color-primary: #111 !important;
       --wo-color-primary-rgb: 17,17,17 !important;
       --wo-color-accent: #111 !important;
@@ -31,41 +56,97 @@
       --mdc-outlined-button-outline-color: #111 !important;
       --mdc-protected-button-container-color: #111 !important;
       --mdc-protected-button-label-text-color: #fff !important;
-      --mdc-slider-active-track-color: #111 !important;
-      --mdc-slider-inactive-track-color: #111 !important;
-      --mdc-slider-focus-handle-color: #111 !important;
-      --mdc-slider-hover-handle-color: #111 !important;
-      --mdc-slider-pressed-handle-color: #111 !important;
-      --mdc-slider-handle-color: #fff !important;
       accent-color: #111 !important;
+      color: #fff !important;
     }
-    .wo-RadarFrame .timeline,
-    .wo-RadarFrame .timeline *,
-    .wo-RadarFrame .controls,
-    .wo-RadarFrame .controls *,
-    .wo-RadarFrame .toolbar,
-    .wo-RadarFrame .toolbar *,
-    .wo-RadarFrame .mat-mdc-slider,
-    .wo-RadarFrame .mat-mdc-slider *,
-    .wo-RadarFrame button,
-    .wo-RadarFrame [role="button"] {
+
+    wo-control-container.bottom,
+    wo-control-container.bottom *,
+    wo-logo,
+    wo-logo *,
+    wo-info-label,
+    wo-info-label * {
+      background-color: #111 !important;
+      border-color: #111 !important;
+      color: #fff !important;
+    }
+
+    .btn,
+    .btn.secondary,
+    .btn.quarterly,
+    wo-control-container button,
+    wo-control-container a,
+    wo-control-container .btn,
+    wo-base-control,
+    wo-base-control button,
+    wo-base-control .main,
+    wo-base-control .date,
+    wo-layer-toggle button,
+    wo-layer-toggle .btn,
+    wo-play-pause-control button,
+    wo-time-label,
+    wo-time-label .main,
+    wo-time-label .date,
+    wo-toggle button,
+    wo-toggle .btn,
+    wo-desktop-compact .controls button,
+    wo-desktop-compact .controls .btn {
       background-color: #111 !important;
       border-color: #111 !important;
       color: #fff !important;
       box-shadow: none !important;
     }
-    .wo-RadarFrame .mat-mdc-slider .mdc-slider__track--active_fill,
-    .wo-RadarFrame .mat-mdc-slider .mdc-slider__track--inactive,
-    .wo-RadarFrame .mat-mdc-slider .mdc-slider__track--inactive::after {
-      background-color: #111 !important;
-      border-color: #111 !important;
+
+    .btn:hover,
+    .btn:active,
+    wo-control-container button:hover,
+    wo-control-container button:active,
+    wo-layer-toggle button:hover,
+    wo-layer-toggle button:active,
+    wo-play-pause-control button:hover,
+    wo-play-pause-control button:active,
+    wo-toggle button:hover,
+    wo-toggle button:active {
+      background-color: #222 !important;
+      border-color: #222 !important;
+      color: #fff !important;
     }
-    .wo-RadarFrame .mat-mdc-slider .mdc-slider__thumb,
-    .wo-RadarFrame .mat-mdc-slider .mdc-slider__focus-ring {
-      background-color: #fff !important;
+
+    .btn.disabled,
+    .btn.secondary.disabled,
+    .btn.quarterly.disabled,
+    wo-control-container button[disabled],
+    wo-control-container button[aria-disabled="true"],
+    wo-play-pause-control button[disabled],
+    wo-play-pause-control button[aria-disabled="true"] {
+      background-color: #2a2a2a !important;
+      border-color: #2a2a2a !important;
+      color: #999 !important;
+    }
+
+    wo-time-control-slider .fill {
+      background: #333 !important;
+    }
+
+    wo-time-control-slider .knob,
+    wo-time-control-slider .knob:before {
+      background: #fff !important;
       border-color: #fff !important;
     }
+
+    svg [fill="#10658e"],
+    svg [fill="#00537f"],
+    svg [fill="#27759c"],
+    svg [stroke="#10658e"],
+    svg [stroke="#00537f"],
+    svg [stroke="#27759c"],
+    svg [fill="#003959"],
+    svg [stroke="#003959"] {
+      fill: #fff !important;
+      stroke: #fff !important;
+    }
   `;
+
 
 
   const injectCSS = () => {
