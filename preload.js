@@ -17,7 +17,56 @@
     .tracking-consent, .gdpr, .cmp-ui, .cmp-layer {
       display: none !important; visibility: hidden !important; opacity: 0 !important;
     }
+    :root,
+    body,
+    .wo-RadarFrame,
+    .wo-RadarFrame * {
+      --wo-color-primary: #111 !important;
+      --wo-color-primary-rgb: 17,17,17 !important;
+      --wo-color-accent: #111 !important;
+      --mdc-theme-primary: #111 !important;
+      --mdc-theme-on-primary: #fff !important;
+      --mdc-filled-button-container-color: #111 !important;
+      --mdc-filled-button-label-text-color: #fff !important;
+      --mdc-outlined-button-outline-color: #111 !important;
+      --mdc-protected-button-container-color: #111 !important;
+      --mdc-protected-button-label-text-color: #fff !important;
+      --mdc-slider-active-track-color: #111 !important;
+      --mdc-slider-inactive-track-color: #111 !important;
+      --mdc-slider-focus-handle-color: #111 !important;
+      --mdc-slider-hover-handle-color: #111 !important;
+      --mdc-slider-pressed-handle-color: #111 !important;
+      --mdc-slider-handle-color: #fff !important;
+      accent-color: #111 !important;
+    }
+    .wo-RadarFrame .timeline,
+    .wo-RadarFrame .timeline *,
+    .wo-RadarFrame .controls,
+    .wo-RadarFrame .controls *,
+    .wo-RadarFrame .toolbar,
+    .wo-RadarFrame .toolbar *,
+    .wo-RadarFrame .mat-mdc-slider,
+    .wo-RadarFrame .mat-mdc-slider *,
+    .wo-RadarFrame button,
+    .wo-RadarFrame [role="button"] {
+      background-color: #111 !important;
+      border-color: #111 !important;
+      color: #fff !important;
+      box-shadow: none !important;
+    }
+    .wo-RadarFrame .mat-mdc-slider .mdc-slider__track--active_fill,
+    .wo-RadarFrame .mat-mdc-slider .mdc-slider__track--inactive,
+    .wo-RadarFrame .mat-mdc-slider .mdc-slider__track--inactive::after {
+      background-color: #111 !important;
+      border-color: #111 !important;
+    }
+    .wo-RadarFrame .mat-mdc-slider .mdc-slider__thumb,
+    .wo-RadarFrame .mat-mdc-slider .mdc-slider__focus-ring {
+      background-color: #fff !important;
+      border-color: #fff !important;
+    }
   `;
+
 
   const injectCSS = () => {
     try {
