@@ -145,6 +145,47 @@
       fill: #fff !important;
       stroke: #fff !important;
     }
+
+
+    .item[_ngcontent-ng-c1920928032] {
+      display: flex !important;
+      justify-content: center !important;
+      align-items: center !important;
+      width: 70px !important;
+      border-right: 1px solid #333 !important;
+      box-sizing: content-box !important;
+      overflow: hidden !important;
+    }
+
+    [_nghost-ng-c3042192997] {
+      background: center no-repeat !important;
+      background-color: #111 !important;
+      height: 100% !important;
+      color: #fff !important;
+      display: flex !important;
+      justify-content: center !important;
+      align-items: center !important;
+      min-width: 40px !important;
+    }
+
+    wo-logo[_ngcontent-ng-c3097851228],
+    wo-control-container[_ngcontent-ng-c3097851228],
+    wo-info-label[_ngcontent-ng-c3097851228] {
+      --control-border-radius: 2px !important;
+      --control-background: #111 !important;
+      --control-active-background: #333 !important;
+      --control-active-font-weight: 500 !important;
+      --control-border: #333 !important;
+      --zoom-icon-size: 36px !important;
+      --layer-toggle-icon-size: 28px !important;
+      --play-icon-size: 16px !important;
+      --pause-icon-size: 14px !important;
+      --stop-icon-size: 18px !important;
+      --time-label-width: auto !important;
+      --time-label-height: 40px !important;
+      --control-margin: 8px !important;
+    }
+
   `;
 
 
