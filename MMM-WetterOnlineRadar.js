@@ -220,7 +220,7 @@ Module.register("MMM-WetterOnlineRadar", {
     const lon = (coords && typeof coords.lon === "number") ? coords.lon : 13.405;
     const zoom = typeof zoomLevel === "number" ? zoomLevel : 8;
 
-    const u = new URL("https://radar.wo-cloud.com/desktop/rr/compact");
+    const u = new URL("https://radar.wo-cloud.com/desktop/wr/compact");
     u.searchParams.set("wrx", `${lat.toFixed(4)},${lon.toFixed(4)}`);
     u.searchParams.set("wry", `${lat.toFixed(4)},${lon.toFixed(4)}`);
     u.searchParams.set("wrm", String(zoom));
