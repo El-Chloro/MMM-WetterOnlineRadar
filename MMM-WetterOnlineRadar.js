@@ -25,8 +25,7 @@ Module.register("MMM-WetterOnlineRadar", {
     playZoneBottomOffset: 26,         // Y = Höhe - Offset
 
     // User-Agent für robustes Laden im Electron
-    userAgent:
-      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
+    userAgent: null,
 
     // keine Keep-Alive-Kicks mehr
     keepAliveMs: 0,
@@ -52,14 +51,34 @@ Module.register("MMM-WetterOnlineRadar", {
     root.style.overflow = "hidden";
 
     const url = this._buildRadarUrl();
+    const preloadUrl = this._toFileUrl(this.file("preload.js"));
+
+    const createIframe = () => {
+      const iframe = document.createElement("iframe");
+      iframe.className = "wro-iframe";
+      iframe.src = url;
+      iframe.loading = "eager";
+      iframe.referrerPolicy = "no-referrer";
+      iframe.sandbox = "allow-scripts allow-forms allow-same-origin";
+      Object.assign(iframe.style, {
+        width: "100%",
+        height: "100%",
+        border: "0",
+        transform: `scale(${this.config.zoomCss})`,
+        transformOrigin: "0 0"
+      });
+      if (this.config.blockPointer) iframe.style.pointerEvents = "none";
+      return iframe;
+    };
 
     if (this.config.useWebview) {
       const wv = document.createElement("webview");
       wv.className = "wro-webview";
       wv.setAttribute("src", url);
-      wv.setAttribute("preload", this.file("preload.js"));
+      wv.setAttribute("preload", preloadUrl);
       wv.setAttribute("partition", "persist:mmm-wro");
       wv.setAttribute("allowpopups", "false");
+      wv.setAttribute("webpreferences", "contextIsolation=yes, sandbox=no");
 
       // Darstellung
       Object.assign(wv.style, {
@@ -72,7 +91,7 @@ Module.register("MMM-WetterOnlineRadar", {
       if (this.config.blockPointer) wv.style.pointerEvents = "none";
 
       // UA-Override
-      if (typeof wv.setUserAgentOverride === "function") {
+      if (this.config.userAgent && typeof wv.setUserAgentOverride === "function") {
         try { wv.setUserAgentOverride(this.config.userAgent); } catch (e) {}
       }
 
@@ -127,33 +146,41 @@ Module.register("MMM-WetterOnlineRadar", {
         }, Math.max(0, this.config.firstStartDelay|0));
       };
 
-      wv.addEventListener("did-finish-load", () => {
-        // Scrollbars weg
-        try {
-          wv.executeJavaScript(`(function(){var s=document.createElement('style');s.textContent='*::-webkit-scrollbar{width:0;height:0}';document.documentElement.appendChild(s);}())`);
-        } catch(e){}
-        scheduleFirstStart();
-      });
+      const fallbackToIframe = () => {
+        if (this._webview === wv) this._webview = null;
+        if (wv.parentNode) wv.parentNode.removeChild(wv);
+        if (!this._iframe) {
+          const iframe = createIframe();
+          root.appendChild(iframe);
+          this._iframe = iframe;
+        }
+      };
 
-      // Keine dauerhaften Keep-Alive-Kicks mehr.
-      root.appendChild(wv);
-      this._webview = wv;
+      const canUseWebview = typeof wv.loadURL === "function";
+      if (!canUseWebview) {
+        fallbackToIframe();
+      } else {
+        wv.addEventListener("did-fail-load", (ev) => {
+          if (ev && ev.errorCode === -3) return;
+          if (ev && ev.isMainFrame === false) return;
+          fallbackToIframe();
+        });
+
+        wv.addEventListener("did-finish-load", () => {
+          // Scrollbars weg
+          try {
+            wv.executeJavaScript(`(function(){var s=document.createElement('style');s.textContent='*::-webkit-scrollbar{width:0;height:0}';document.documentElement.appendChild(s);}())`);
+          } catch(e){}
+          scheduleFirstStart();
+        });
+
+        // Keine dauerhaften Keep-Alive-Kicks mehr.
+        root.appendChild(wv);
+        this._webview = wv;
+      }
     } else {
       // Hinweis: in <iframe> sind trusted Events nicht möglich → Autoplay unsicher
-      const iframe = document.createElement("iframe");
-      iframe.className = "wro-iframe";
-      iframe.src = url;
-      iframe.loading = "eager";
-      iframe.referrerPolicy = "no-referrer";
-      iframe.sandbox = "allow-scripts allow-forms allow-same-origin";
-      Object.assign(iframe.style, {
-        width: "100%",
-        height: "100%",
-        border: "0",
-        transform: `scale(${this.config.zoomCss})`,
-        transformOrigin: "0 0"
-      });
-      if (this.config.blockPointer) iframe.style.pointerEvents = "none";
+      const iframe = createIframe();
       root.appendChild(iframe);
       this._iframe = iframe;
     }
@@ -230,6 +257,14 @@ Module.register("MMM-WetterOnlineRadar", {
   _cacheBusted(url) {
     try { const u = new URL(url); u.searchParams.set("_ts", Date.now().toString()); return u.toString(); }
     catch { return url + (url.includes("?") ? "&" : "?") + "_ts=" + Date.now(); }
+  },
+
+  _toFileUrl(pathLike) {
+    if (!pathLike || typeof pathLike !== "string") return pathLike;
+    if (pathLike.startsWith("file://")) return pathLike;
+    if (/^[a-zA-Z]:[\\/]/.test(pathLike)) return "file:///" + pathLike.replace(/\\/g, "/");
+    if (pathLike.startsWith("/")) return "file://" + pathLike;
+    return pathLike;
   },
 
   _scheduleReload() {

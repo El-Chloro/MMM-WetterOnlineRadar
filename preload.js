@@ -287,8 +287,19 @@
     return null;
   };
 
-  const { ipcRenderer } = require("electron");
-  const emitTarget = (x, y) => { try { ipcRenderer.sendToHost("mm-wro-autoplay-target", { x, y }); } catch(_) {} };
+  let ipcRenderer = null;
+  try {
+    ({ ipcRenderer } = require("electron"));
+  } catch (_) {
+    ipcRenderer = null;
+  }
+  const emitTarget = (x, y) => {
+    try {
+      if (ipcRenderer && typeof ipcRenderer.sendToHost === "function") {
+        ipcRenderer.sendToHost("mm-wro-autoplay-target", { x, y });
+      }
+    } catch(_) {}
+  };
 
   // —— Exporte ins Host-Fenster ——
   window.__mmWROIsPlaying = () => { try { return !!isPlaying(); } catch(_) { return false; } };
