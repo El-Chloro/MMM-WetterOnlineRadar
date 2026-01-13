@@ -135,6 +135,9 @@ Module.register("MMM-WetterOnlineRadar", {
           this._checkAndStart(async () => {
             // 1) erst den Preload bitten, die Koordinaten zu schicken
             try {
+              await wv.executeJavaScript("window.__mmWROAutoPlay && window.__mmWROAutoPlay()");
+            } catch(_) {}
+            try {
               await wv.executeJavaScript("window.__mmWROEmitPlayTarget && window.__mmWROEmitPlayTarget()");
             } catch(_) {}
 
@@ -279,6 +282,9 @@ Module.register("MMM-WetterOnlineRadar", {
           if (this._firstStartTimer) clearTimeout(this._firstStartTimer);
           this._firstStartTimer = setTimeout(() => {
             this._checkAndStart(async () => {
+              try {
+                await this._webview.executeJavaScript("window.__mmWROAutoPlay && window.__mmWROAutoPlay()");
+              } catch(_) {}
               try {
                 await this._webview.executeJavaScript("window.__mmWROEmitPlayTarget && window.__mmWROEmitPlayTarget()");
               } catch(_) {}

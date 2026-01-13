@@ -1,5 +1,5 @@
 // Läuft im Kontext des WO-Radarframes.
-// Keine Autosuche/Autoklicks mehr. Stellt nur Hilfsfunktionen bereit:
+// Keine Autosuche/Autoklicks ohne Anforderung. Stellt nur Hilfsfunktionen bereit:
 //  - __mmWROIsPlaying():  true/false
 //  - __mmWROEmitPlayTarget(): findet den Play-Button (auch Shadow DOM) und sendet Koordinaten
 //  - __mmWROKick(): nur für evtl. spätere Zwecke (CSS erneut setzen).
@@ -317,9 +317,21 @@
     } catch (_) { return false; }
   };
 
+  window.__mmWROAutoPlay = () => {
+    try {
+      injectCSS();
+      scheduleCssRefresh();
+      if (isPlaying()) return true;
+      const btn = findPlayButton();
+      if (!btn) return false;
+      try { btn.click(); } catch(_) {}
+      return true;
+    } catch (_) { return false; }
+  };
+
   window.__mmWROKick = () => { injectCSS(); scheduleCssRefresh(); return true; };
 
-  // gleich zu Beginn CSS setzen; KEINE Autoklicks!
+  // gleich zu Beginn CSS setzen
   const initialCss = () => {
     injectCSS();
     scheduleCssRefresh();
