@@ -23,6 +23,9 @@ Module.register("MMM-WetterOnlineRadar", {
     // Klick-Tuning (Play-Zone-Fallback)
     playZoneXFactor: 0.86,            // weiter rechts (0.86 ~ rechts unten)
     playZoneBottomOffset: 26,         // Y = Höhe - Offset
+    // Direct click offsets from right/bottom (px). If set, overrides playZone*.
+    playClickOffsetRight: 24,
+    playClickOffsetBottom: 18,
 
     // User-Agent für robustes Laden im Electron
     userAgent: null,
@@ -223,13 +226,25 @@ Module.register("MMM-WetterOnlineRadar", {
     // 2) Klick in die „Play-Zone“ deutlich rechts unten (nicht auf Tabs!)
     setTimeout(() => {
       try {
-        const xf = Math.min(0.98, Math.max(0.60, Number(this.config.playZoneXFactor) || 0.86));
-        const yOff = Math.max(8, Number(this.config.playZoneBottomOffset) || 26);
         this._webview.executeJavaScript("({w:window.innerWidth,h:window.innerHeight})")
           .then(dim => {
             if (!dim) return;
-            const px = Math.floor(dim.w * xf);       // weiter rechts
-            const py = Math.floor(dim.h - yOff);     // an der Steuerleiste
+            const offR = Number(this.config.playClickOffsetRight);
+            const offB = Number(this.config.playClickOffsetBottom);
+            const hasOffsets = Number.isFinite(offR) && offR > 0 && Number.isFinite(offB) && offB > 0;
+            let px = 0;
+            let py = 0;
+            if (hasOffsets) {
+              const r = Math.min(dim.w - 2, Math.max(2, Math.floor(offR)));
+              const b = Math.min(dim.h - 2, Math.max(2, Math.floor(offB)));
+              px = Math.floor(dim.w - r);
+              py = Math.floor(dim.h - b);
+            } else {
+              const xf = Math.min(0.98, Math.max(0.60, Number(this.config.playZoneXFactor) || 0.86));
+              const yOff = Math.max(8, Number(this.config.playZoneBottomOffset) || 26);
+              px = Math.floor(dim.w * xf);       // weiter rechts
+              py = Math.floor(dim.h - yOff);     // an der Steuerleiste
+            }
             sendMouseClick(px, py, 1);
           }).catch(()=>{});
       } catch(_) {}
